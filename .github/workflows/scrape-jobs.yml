@@ -1,0 +1,70 @@
+name: Refresh Job Listings
+
+on:
+  # Manual trigger with inputs — gives you a button + dropdown in GitHub UI
+  workflow_dispatch:
+    inputs:
+      location:
+        description: "Location to scrape"
+        required: true
+        default: "All Locations"
+        type: choice
+        options:
+          - All Locations
+          - United States
+          - New York, NY
+          - Maryland
+          - Canada
+      keywords:
+        description: "Job title / keywords"
+        required: false
+        default: "Project Manager"
+      count:
+        description: "Max jobs per location"
+        required: false
+        default: "100"
+
+  # Auto-refresh every Monday at 7am ET (12:00 UTC)
+  schedule:
+    - cron: "0 12 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run scrape
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          LOCATION="${{ github.event.inputs.location || 'All Locations' }}"
+          KEYWORDS="${{ github.event.inputs.keywords || 'Project Manager' }}"
+          COUNT="${{ github.event.inputs.count || '100' }}"
+
+          if [ "$LOCATION" = "All Locations" ]; then
+            python scripts/scrape.py --all --keywords "$KEYWORDS" --count "$COUNT"
+          else
+            python scripts/scrape.py --location "$LOCATION" --keywords "$KEYWORDS" --count "$COUNT"
+          fi
+
+      - name: Commit and push updated CSV
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/jobs.csv
+          git diff --staged --quiet && echo "No changes to commit" || (
+            LOCATION="${{ github.event.inputs.location || 'All Locations (scheduled)' }}"
+            git commit -m "Update job listings — $LOCATION $(date +'%Y-%m-%d')"
+            git push
+          )
