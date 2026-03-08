@@ -106,7 +106,7 @@ function App() {
         <div className="header-inner">
           <div>
             <h1>🎯 Niks Projects — Job Board</h1>
-            <p className="subtitle">LinkedIn Jobs · Virginia · {jobs.length} total listings</p>
+            <p className="subtitle">Project Management Jobs · {jobs.length} total listings</p>
           </div>
           <button className="btn-share" onClick={copyLink} title="Copy shareable link">
             🔗 Share This View

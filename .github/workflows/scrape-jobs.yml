@@ -16,15 +16,20 @@ on:
           - Maryland
           - Canada
       keywords:
-        description: "Job title / keywords"
-        required: false
-        default: "Project Manager"
+        description: "Job role to scrape"
+        required: true
+        default: "All Roles"
+        type: choice
+        options:
+          - All Roles
+          - Project Manager
+          - Scrum Master
       count:
         description: "Max jobs per location"
         required: false
         default: "100"
 
-  # Auto-refresh every Monday at 7am ET (12:00 UTC)
+  # Auto-refresh every Monday at 7am ET (12:00 UTC) — runs all locations + all roles
   schedule:
     - cron: "0 12 * * 1"
 
@@ -49,13 +54,23 @@ jobs:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: |
           LOCATION="${{ github.event.inputs.location || 'All Locations' }}"
-          KEYWORDS="${{ github.event.inputs.keywords || 'Project Manager' }}"
+          ROLE="${{ github.event.inputs.keywords || 'All Roles' }}"
           COUNT="${{ github.event.inputs.count || '100' }}"
 
-          if [ "$LOCATION" = "All Locations" ]; then
-            python scripts/scrape.py --all --keywords "$KEYWORDS" --count "$COUNT"
+          run_scrape() {
+            KEYWORDS="$1"
+            if [ "$LOCATION" = "All Locations" ]; then
+              python3 scripts/scrape.py --all --keywords "$KEYWORDS" --count "$COUNT"
+            else
+              python3 scripts/scrape.py --location "$LOCATION" --keywords "$KEYWORDS" --count "$COUNT"
+            fi
+          }
+
+          if [ "$ROLE" = "All Roles" ]; then
+            run_scrape "Project Manager"
+            run_scrape "Scrum Master"
           else
-            python scripts/scrape.py --location "$LOCATION" --keywords "$KEYWORDS" --count "$COUNT"
+            run_scrape "$ROLE"
           fi
 
       - name: Commit and push updated CSV
@@ -65,6 +80,7 @@ jobs:
           git add public/jobs.csv
           git diff --staged --quiet && echo "No changes to commit" || (
             LOCATION="${{ github.event.inputs.location || 'All Locations (scheduled)' }}"
-            git commit -m "Update job listings — $LOCATION $(date +'%Y-%m-%d')"
+            ROLE="${{ github.event.inputs.keywords || 'All Roles (scheduled)' }}"
+            git commit -m "Update job listings — $ROLE · $LOCATION $(date +'%Y-%m-%d')"
             git push
           )
