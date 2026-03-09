@@ -4,9 +4,16 @@ import JobCard from './components/JobCard'
 import Filters from './components/Filters'
 import './App.css'
 
+const CANADA_PATTERN = /\bcanada\b|,\s*(ON|BC|AB|QC|MB|SK|NS|NB|NL|PE|NT|NU|YT)\b/i
+
+function detectCountry(location) {
+  return CANADA_PATTERN.test(location) ? 'Canada' : 'United States'
+}
+
 function getInitialFilters() {
   const params = new URLSearchParams(window.location.search)
   return {
+    country: params.get('country') || '',
     location: params.get('location') || '',
     workType: params.get('workType') || '',
     experienceLevel: params.get('experienceLevel') || '',
@@ -26,6 +33,7 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams()
     if (search) params.set('search', search)
+    if (filters.country) params.set('country', filters.country)
     if (filters.location) params.set('location', filters.location)
     if (filters.workType) params.set('workType', filters.workType)
     if (filters.experienceLevel) params.set('experienceLevel', filters.experienceLevel)
@@ -50,14 +58,17 @@ function App() {
 
   const filterOptions = useMemo(() => {
     const unique = (key) => [...new Set(jobs.map((j) => j[key]).filter(Boolean))].sort()
+    const countryJobs = filters.country
+      ? jobs.filter((j) => detectCountry(j.location) === filters.country)
+      : jobs
     return {
-      location: unique('location'),
+      location: [...new Set(countryJobs.map((j) => j.location).filter(Boolean))].sort(),
       workType: unique('workType'),
       experienceLevel: unique('experienceLevel'),
       contractType: unique('contractType'),
       sector: unique('sector'),
     }
-  }, [jobs])
+  }, [jobs, filters.country])
 
   const filteredJobs = useMemo(() => {
     let result = jobs.filter((job) => {
@@ -66,10 +77,11 @@ function App() {
         !q ||
         job.title?.toLowerCase().includes(q) ||
         job.companyName?.toLowerCase().includes(q)
+      const matchCountry = !filters.country || detectCountry(job.location) === filters.country
       const matchFilters = Object.entries(filters).every(
-        ([key, val]) => !val || job[key] === val
+        ([key, val]) => !val || key === 'country' || job[key] === val
       )
-      return matchSearch && matchFilters
+      return matchSearch && matchCountry && matchFilters
     })
 
     if (sortBy === 'postedTime') {
@@ -84,7 +96,7 @@ function App() {
 
   const clearFilters = () => {
     setSearch('')
-    setFilters({ location: '', workType: '', experienceLevel: '', contractType: '', sector: '' })
+    setFilters({ country: '', location: '', workType: '', experienceLevel: '', contractType: '', sector: '' })
     setSortBy('postedTime')
   }
 

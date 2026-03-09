@@ -1,5 +1,6 @@
 export default function Filters({ filters, setFilters, filterOptions, onClear }) {
   const update = (key, val) => setFilters((f) => ({ ...f, [key]: val }))
+  const updateCountry = (val) => setFilters((f) => ({ ...f, country: val, location: '' }))
   const hasFilters = Object.values(filters).some(Boolean)
 
   return (
@@ -12,7 +13,16 @@ export default function Filters({ filters, setFilters, filterOptions, onClear })
       </div>
 
       <div className="filter-group">
-        <label>Location</label>
+        <label>Country</label>
+        <select value={filters.country} onChange={(e) => updateCountry(e.target.value)}>
+          <option value="">All Countries</option>
+          <option value="United States">🇺🇸 United States</option>
+          <option value="Canada">🇨🇦 Canada</option>
+        </select>
+      </div>
+
+      <div className="filter-group">
+        <label>City / State</label>
         <select value={filters.location} onChange={(e) => update('location', e.target.value)}>
           <option value="">All Locations</option>
           {filterOptions.location.map((v) => <option key={v} value={v}>{v}</option>)}
