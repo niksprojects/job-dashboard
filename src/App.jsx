@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Papa from 'papaparse'
 import JobCard from './components/JobCard'
 import Filters from './components/Filters'
+import AccessGate, { PREVIEW_COUNT } from './components/AccessGate'
 import './App.css'
 
 const CANADA_PATTERN = /\bcanada\b|,\s*(ON|BC|AB|QC|MB|SK|NS|NB|NL|PE|NT|NU|YT)\b/i
@@ -25,6 +26,7 @@ function getInitialFilters() {
 function App() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [unlocked, setUnlocked] = useState(() => localStorage.getItem('jd_access') === 'true')
   const [search, setSearch] = useState(new URLSearchParams(window.location.search).get('search') || '')
   const [filters, setFilters] = useState(getInitialFilters)
   const [sortBy, setSortBy] = useState(new URLSearchParams(window.location.search).get('sort') || 'postedTime')
@@ -162,7 +164,14 @@ function App() {
             {filteredJobs.length === 0 ? (
               <div className="no-results">No jobs match your filters. Try adjusting them!</div>
             ) : (
-              filteredJobs.map((job, i) => <JobCard key={i} job={job} />)
+              <>
+                {(unlocked ? filteredJobs : filteredJobs.slice(0, PREVIEW_COUNT)).map((job, i) => (
+                  <JobCard key={i} job={job} />
+                ))}
+                {!unlocked && filteredJobs.length > PREVIEW_COUNT && (
+                  <AccessGate onUnlock={() => setUnlocked(true)} />
+                )}
+              </>
             )}
           </div>
         </section>
