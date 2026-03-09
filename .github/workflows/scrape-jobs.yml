@@ -27,7 +27,7 @@ on:
       count:
         description: "Max jobs per location"
         required: false
-        default: "100"
+        default: "200"
 
   # Auto-refresh every Monday at 7am ET (12:00 UTC) — runs all locations + all roles
   schedule:

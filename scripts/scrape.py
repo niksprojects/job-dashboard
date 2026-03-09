@@ -22,7 +22,10 @@ import sys
 import time
 import urllib.request
 import urllib.parse
+from datetime import date, datetime, timedelta
 from pathlib import Path
+
+CUTOFF_DAYS = 30  # Remove jobs older than this many days
 
 ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 BASE_URL = "https://api.apify.com/v2"
@@ -149,6 +152,26 @@ def load_existing_csv():
     return jobs
 
 
+def remove_old_jobs(jobs_dict):
+    cutoff = date.today() - timedelta(days=CUTOFF_DAYS)
+    kept = {}
+    removed = 0
+    for key, job in jobs_dict.items():
+        published = job.get("publishedAt", "")
+        if published:
+            try:
+                job_date = datetime.strptime(published[:10], "%Y-%m-%d").date()
+                if job_date < cutoff:
+                    removed += 1
+                    continue
+            except ValueError:
+                pass  # Unparseable date — keep the job
+        kept[key] = job
+    if removed:
+        print(f"  Removed {removed} jobs older than {CUTOFF_DAYS} days ({cutoff})")
+    return kept
+
+
 def save_csv(jobs_dict):
     CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
@@ -180,7 +203,7 @@ def main():
     group.add_argument("--location", choices=list(LOCATIONS.keys()), help="Single location to scrape")
     group.add_argument("--all", action="store_true", help="Scrape all configured locations")
     parser.add_argument("--keywords", default="Project Manager", help="Job search keywords")
-    parser.add_argument("--count", type=int, default=100, help="Max jobs per location (default: 100)")
+    parser.add_argument("--count", type=int, default=200, help="Max jobs per location (default: 200)")
     args = parser.parse_args()
 
     token = get_token()
@@ -195,7 +218,8 @@ def main():
         all_new_jobs.extend(jobs)
 
     merged = merge_jobs(existing, all_new_jobs)
-    save_csv(merged)
+    cleaned = remove_old_jobs(merged)
+    save_csv(cleaned)
 
 
 if __name__ == "__main__":
