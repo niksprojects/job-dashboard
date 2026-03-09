@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 LinkedIn job listings dashboard for IT Project Management mentorship students. Built with React 19 + Vite 7, using PapaParse to load job data from a static CSV file. Deployed on Vercel, scraping managed via Apify + GitHub Actions.
 
-- **Live site**: https://job-dashboard-rho.vercel.app/
+- **Live site**: https://jobs.primeitpm.com
+- **Vercel URL**: https://job-dashboard-rho.vercel.app/
 - **GitHub**: https://github.com/niksprojects/job-dashboard
 - **Notion workflow doc**: https://www.notion.so/31d2480d211c813fafe9c02dc209018a
 
@@ -49,15 +50,30 @@ Go to https://github.com/niksprojects/job-dashboard/actions → Refresh Job List
 
 ## Architecture
 
-Single-page React app with three components and no router:
+Single-page React app with four components and no router:
 
-- **`src/App.jsx`** — All state (jobs, search, filters, sort). Loads `public/jobs.csv` via PapaParse. Syncs bidirectionally with URL query params. Contains `detectCountry()` for Canada/US grouping.
+- **`src/App.jsx`** — All state (jobs, search, filters, sort, unlocked). Loads `public/jobs.csv` via PapaParse. Syncs bidirectionally with URL query params. Contains `detectCountry()` for Canada/US grouping.
 - **`src/components/Filters.jsx`** — Sidebar filter dropdowns. Country filter resets city/state on change.
 - **`src/components/JobCard.jsx`** — Single job listing card with expand/collapse for description.
+- **`src/components/AccessGate.jsx`** — Lock gate shown after 5 preview jobs for unauthenticated visitors.
 
-**Data flow:** CSV → PapaParse → `jobs` state → `useMemo` derives `filterOptions` + `filteredJobs` → rendered by components.
+**Data flow:** CSV → PapaParse → `jobs` state → `useMemo` derives `filterOptions` + `filteredJobs` → if unlocked show all, else show first 5 + AccessGate → rendered by components.
 
 **URL query params:** `search`, `country`, `location`, `workType`, `experienceLevel`, `contractType`, `sector`, `sort`. Used to create shareable student-specific links.
+
+## Access Gate
+
+Public visitors see 5 job previews then hit a lock gate. Mentorship clients enter a code to unlock the full list.
+
+- **Access code**: stored as `VITE_ACCESS_CODE` Vercel environment variable — NOT in source code
+- **Local dev**: `.env.local` file (gitignored) contains `VITE_ACCESS_CODE=...`
+- **Unlock persistence**: stored in `localStorage` key `jd_access` — stays unlocked across visits
+- **Request Access**: pre-filled email to `support@niksprojects.com`
+- **To change the code**: update `VITE_ACCESS_CODE` in Vercel dashboard → redeploy
+
+**To add Vercel env var:**
+1. Go to https://vercel.com/niksprojects/job-dashboard/settings/environment-variables
+2. Add `VITE_ACCESS_CODE` → Production → Save → Redeploy
 
 ## Data
 
