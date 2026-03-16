@@ -29,9 +29,9 @@ on:
         required: false
         default: "200"
 
-  # Auto-refresh every Monday at 7am ET (12:00 UTC) — runs all locations + all roles
+  # Auto-refresh every Monday at 2am ET (06:00 UTC) — off-peak to avoid GitHub runner delays
   schedule:
-    - cron: "0 12 * * 1"
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: write
