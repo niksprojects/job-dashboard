@@ -82,5 +82,6 @@ jobs:
             LOCATION="${{ github.event.inputs.location || 'All Locations (scheduled)' }}"
             ROLE="${{ github.event.inputs.keywords || 'All Roles (scheduled)' }}"
             git commit -m "Update job listings — $ROLE · $LOCATION $(date +'%Y-%m-%d')"
+            git pull --rebase
             git push
           )
