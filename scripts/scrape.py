@@ -63,13 +63,22 @@ def get_token():
     sys.exit(1)
 
 
-def api_get(path, token, params=None):
+def api_get(path, token, params=None, retries=3):
     query = {"token": token}
     if params:
         query.update(params)
     url = f"{BASE_URL}{path}?{urllib.parse.urlencode(query)}"
-    with urllib.request.urlopen(url) as resp:
-        return json.loads(resp.read())
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            if e.code in (502, 503, 504) and attempt < retries - 1:
+                wait = 5 * (attempt + 1)
+                print(f"\n  HTTP {e.code}, retrying in {wait}s...", end="", flush=True)
+                time.sleep(wait)
+            else:
+                raise
 
 
 def api_post(path, token, data):
