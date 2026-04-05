@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LinkedIn job listings dashboard for IT Project Management mentorship students. Built with React 19 + Vite 7, using PapaParse to load job data from a static CSV file. Deployed on Vercel, scraping managed via Apify + GitHub Actions.
+Job listings dashboard for IT Project Management mentorship students. Built with React 19 + Vite 7, backed by Supabase, authenticated via Clerk. Deployed on Vercel, scraping managed via Apify (LinkedIn) + JSearch/RapidAPI (Google Jobs).
 
 - **Live site**: https://jobs.primeitpm.com
 - **Vercel URL**: https://job-dashboard-rho.vercel.app/
 - **GitHub**: https://github.com/niksprojects/job-dashboard
-- **Notion workflow doc**: https://www.notion.so/31d2480d211c813fafe9c02dc209018a
+- **Supabase project**: `nndmgfjldqyvmfcuezuj` (dedicated, separate from portal)
 
 ## Commands
 
@@ -18,79 +18,128 @@ LinkedIn job listings dashboard for IT Project Management mentorship students. B
 - `npm run lint` — ESLint
 - `npm run preview` — Preview production build locally
 
-## Scraping
+## Data Sources & Scraping
 
-Script: `scripts/scrape.py` (stdlib only, no pip installs needed)
+### 1. Apify LinkedIn (daily, free)
+
+Script: `scripts/scrape.py` → outputs JSON → `scripts/scrape-jobs.mjs` imports to Supabase.
 
 ```bash
-# Single location + role
-python3 scripts/scrape.py --location "New York, NY" --keywords "Project Manager"
+# Full scrape (5 roles x 3 locations = 15 queries)
+python3 scripts/scrape.py --all --count 100
+node scripts/scrape-jobs.mjs --input /tmp/linkedin-jobs-$(date +%Y-%m-%d).json
 
-# All locations, single role
-python3 scripts/scrape.py --all --keywords "Scrum Master"
-
-# All locations, all roles (run twice)
-python3 scripts/scrape.py --all --keywords "Project Manager"
-python3 scripts/scrape.py --all --keywords "Scrum Master"
+# Single role + location
+python3 scripts/scrape.py --location "United States" --role "Scrum Master" --count 100
 ```
 
-**Locations available:** `United States`, `New York, NY`, `Maryland`, `Canada`
-
-**Behavior:**
-- Reads `APIFY_TOKEN` from env var (CI) or macOS Keychain (local)
-- Merges results into `public/jobs.csv` by LinkedIn job ID — no duplicates
-- `remove_old_jobs()` purges listings older than 30 days on every save
-- Default `--count 200` per location (safe for Apify free tier)
 - Actor: `curious_coder~linkedin-jobs-scraper` (free)
+- Reads `APIFY_TOKEN` from env var or macOS Keychain (`apify-mcp-token`)
 
-**GitHub Actions trigger (no terminal needed):**
-Go to https://github.com/niksprojects/job-dashboard/actions → Refresh Job Listings → Run workflow → pick location + role
+### 2. JSearch / RapidAPI (Mon/Wed/Fri, free tier 200 req/month)
 
-**Weekly auto-refresh:** Every Monday 7am ET — all locations + all roles, automatic.
+Script: `scripts/scrape-jsearch.mjs` → outputs JSON → `scripts/scrape-jobs.mjs` imports to Supabase.
+
+```bash
+# Full scrape (5 roles x 3 locations = 15 queries)
+node scripts/scrape-jsearch.mjs
+node scripts/scrape-jobs.mjs --input /tmp/jsearch-jobs-$(date +%Y-%m-%d).json
+
+# Single role + location
+node scripts/scrape-jsearch.mjs --role "Scrum Master" --location "Canada"
+```
+
+- Pulls from Google Jobs (Indeed, LinkedIn, Glassdoor, ZipRecruiter, 50+ boards)
+- Reads `RAPIDAPI_KEY` from env var or macOS Keychain (`rapidapi-jsearch-key`)
+
+### 3. Supabase ingestion (shared)
+
+Script: `scripts/scrape-jobs.mjs --input <file.json>`
+
+- Normalizes fields, computes SHA-256 dedup hash (title + company + location)
+- Upserts to Supabase (`ON CONFLICT dedup_hash DO NOTHING`)
+- Reads `SUPABASE_SERVICE_ROLE_KEY` from env var or macOS Keychain (`supabase-job-dashboard-service-key`)
+
+### Roles scraped
+Scrum Master, Project Manager, Project Analyst, Project Coordinator, Project Administrator
+
+### Locations scraped
+United States, Canada, Remote
+
+### Scheduling (Claude Code remote triggers)
+- `job-dashboard-apify-daily` — daily 6am ET (10:00 UTC)
+- `job-dashboard-jsearch-mwf` — Mon/Wed/Fri 6am ET (10:00 UTC)
+- Manage at: https://claude.ai/code/scheduled
 
 ## Architecture
 
 Single-page React app with four components and no router:
 
-- **`src/App.jsx`** — All state (jobs, search, filters, sort, unlocked). Loads `public/jobs.csv` via PapaParse. Syncs bidirectionally with URL query params. Contains `detectCountry()` for Canada/US grouping.
-- **`src/components/Filters.jsx`** — Sidebar filter dropdowns. Country filter resets city/state on change.
-- **`src/components/JobCard.jsx`** — Single job listing card with expand/collapse for description.
-- **`src/components/AccessGate.jsx`** — Lock gate shown after 5 preview jobs for unauthenticated visitors.
+- **`src/App.jsx`** — All state (jobs, search, filters, sort). Loads from Supabase (last 15 days). Uses `useUser()` from Clerk for auth. Syncs filters bidirectionally with URL query params.
+- **`src/supabase.js`** — Supabase client (anon key, read-only).
+- **`src/components/Filters.jsx`** — Sidebar filter dropdowns. Filter cascade: Country → State/Province → City.
+- **`src/components/JobCard.jsx`** — Job card with "NEW" badge (last 24h), source badge, expand/collapse description, HTML stripping.
+- **`src/components/AccessGate.jsx`** — Clerk sign-in gate shown after 5 preview jobs for unauthenticated visitors.
+- **`src/main.jsx`** — Wraps app with `ClerkProvider`.
 
-**Data flow:** CSV → PapaParse → `jobs` state → `useMemo` derives `filterOptions` + `filteredJobs` → if unlocked show all, else show first 5 + AccessGate → rendered by components.
+**Data flow:** Supabase query (last 15 days) → `jobs` state → `useMemo` derives `filterOptions` + `filteredJobs` → if signed in show all, else show first 5 + AccessGate.
 
-**URL query params:** `search`, `country`, `location`, `workType`, `experienceLevel`, `contractType`, `sector`, `sort`. Used to create shareable student-specific links.
+**URL query params:** `search`, `country`, `state`, `location`, `workType`, `experienceLevel`, `contractType`, `sector`, `sort`.
 
-## Access Gate
+## Authentication
 
-Public visitors see 5 job previews then hit a lock gate. Mentorship clients enter a code to unlock the full list.
+Uses Clerk (shared with prime-client-portal, same app: PRIME-PM-SIMULATION).
 
-- **Access code**: stored as `VITE_ACCESS_CODE` Vercel environment variable — NOT in source code
-- **Local dev**: `.env.local` file (gitignored) contains `VITE_ACCESS_CODE=...`
-- **Unlock persistence**: stored in `localStorage` key `jd_access` — stays unlocked across visits
-- **Request Access**: pre-filled email to `support@niksprojects.com`
-- **To change the code**: update `VITE_ACCESS_CODE` in Vercel dashboard → redeploy
+- **Production**: `pk_live_...` key in Vercel env var `VITE_CLERK_PUBLISHABLE_KEY`
+- **Local dev**: `pk_test_...` key in `.env.local`
+- Signed-in users see all jobs; unauthenticated see 5 previews + sign-in gate
+- `UserButton` in header for signed-in users
 
-**To add Vercel env var:**
-1. Go to https://vercel.com/niksprojects/job-dashboard/settings/environment-variables
-2. Add `VITE_ACCESS_CODE` → Production → Save → Redeploy
+## Database (Supabase)
 
-## Data
+- **Project URL**: https://nndmgfjldqyvmfcuezuj.supabase.co
+- **Table**: `jobs` — unified schema for all sources
+- **Dedup**: `dedup_hash` column (SHA-256 of normalized title+company+location)
+- **RLS**: public read (anon key), service role write only
+- **Retention**: pg_cron deletes jobs older than 30 days (runs 5am ET daily)
+- **Dashboard shows**: last 15 days of data
 
-`public/jobs.csv` — ~590 jobs across US + Canada, roles: Project Manager + Scrum Master.
-
-CSV fields: `title`, `location`, `postedTime`, `publishedAt`, `jobUrl`, `companyName`, `companyUrl`, `description`, `applicationsCount`, `contractType`, `experienceLevel`, `workType`, `sector`, `salary`, `posterFullName`, `posterProfileUrl`, `companyId`, `applyUrl`, `applyType`, `benefits`
+### Key columns
+`title`, `company_name`, `location_full`, `city`, `state`, `country`, `description`, `apply_url`, `posted_date`, `posted_relative`, `schedule`, `work_type`, `experience_level`, `sector`, `salary`, `source`, `search_role`, `search_location`
 
 ## Filters
 
-| Filter | Source | Notes |
+| Filter | Column | Notes |
 |---|---|---|
-| Country | Derived via `detectCountry()` | `CANADA_PATTERN` checks province codes + "canada" |
-| City / State | `location` CSV field | Options narrow based on country selection |
-| Job Category | `workType` CSV field | |
-| Experience Level | `experienceLevel` CSV field | |
-| Contract Type | `contractType` CSV field | |
-| Sector | `sector` CSV field | |
+| Country | `country` | United States, Canada, Remote |
+| State / Province | `state` | Cascades from country |
+| City | `location_full` | Cascades from state |
+| Job Category | `work_type` | Remote, Hybrid, On-site (inferred) |
+| Experience Level | `experience_level` | Senior, Mid-Senior, Entry (inferred) |
+| Contract Type | `schedule` | Full-time, Part-time, Contract |
+| Sector | `sector` | |
+
+## Environment Variables
+
+### Local (`.env.local`, gitignored)
+```
+VITE_ACCESS_CODE=NIKSPM2026
+VITE_SUPABASE_URL=https://nndmgfjldqyvmfcuezuj.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_...
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+```
+
+### Vercel (Production)
+- `VITE_ACCESS_CODE` — legacy, can be removed after Clerk auth confirmed
+- `VITE_SUPABASE_URL` — Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` — Supabase publishable key
+- `VITE_CLERK_PUBLISHABLE_KEY` — Clerk production key (`pk_live_...`)
+
+### macOS Keychain (scrape scripts, local only)
+- `apify-mcp-token` — Apify API token
+- `rapidapi-jsearch-key` — RapidAPI JSearch key
+- `supabase-job-dashboard-service-key` — Supabase service role key
+- `supabase-job-dashboard-db-password` — Supabase DB password
 
 ## Styling
 
