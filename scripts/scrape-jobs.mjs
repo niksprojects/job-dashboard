@@ -116,12 +116,38 @@ function normalizeCountry(country) {
   return country.trim()
 }
 
+function parseStateFromLocation(location) {
+  if (!location) return ''
+  // Match patterns like "Charlotte, NC" or "New York, NY" or "Toronto, Ontario, Canada"
+  const parts = location.split(',').map(s => s.trim())
+  if (parts.length >= 2) {
+    // Last part might be country, second-to-last might be state
+    // Try the last part first, then second-to-last
+    for (let i = parts.length - 1; i >= 1; i--) {
+      const candidate = parts[i].trim()
+      const upper = candidate.toUpperCase()
+      if (STATE_ABBR[upper]) return STATE_ABBR[upper]
+      // Check if it's already a full state name
+      if (Object.values(STATE_ABBR).includes(candidate)) return candidate
+    }
+  }
+  return ''
+}
+
+function parseCityFromLocation(location) {
+  if (!location) return ''
+  const parts = location.split(',').map(s => s.trim())
+  return parts[0] || ''
+}
+
 function mapJob(raw) {
   const locationFull = raw['Full Location'] || raw.location_full || raw.location || ''
   const title = raw['Job Title'] || raw.title || ''
   const company = raw['Company'] || raw.company_name || raw.companyName || ''
-  const city = raw['City'] || raw.city || ''
-  const state = normalizeState(raw['State/Province'] || raw.state || '')
+  const rawCity = raw['City'] || raw.city || ''
+  const rawState = raw['State/Province'] || raw.state || ''
+  const city = rawCity || parseCityFromLocation(locationFull)
+  const state = normalizeState(rawState) || parseStateFromLocation(locationFull)
   const country = normalizeCountry(raw['Country'] || raw.country || '')
   const source = raw['Source'] || raw.source || ''
   const postedRelative = raw['Posted'] || raw.posted_relative || raw.postedTime || ''
