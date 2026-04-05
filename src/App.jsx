@@ -70,16 +70,37 @@ function App() {
   const filterOptions = useMemo(() => {
     const unique = (key) => [...new Set(jobs.map((j) => j[key]).filter(Boolean))].sort()
 
-    const countryJobs = filters.country
-      ? jobs.filter((j) => j.country === filters.country)
-      : jobs
+    const US_STATES = [
+      'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
+      'Delaware','District of Columbia','Florida','Georgia','Hawaii','Idaho','Illinois',
+      'Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts',
+      'Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada',
+      'New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota',
+      'Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina',
+      'South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington',
+      'West Virginia','Wisconsin','Wyoming',
+    ]
+    const CA_PROVINCES = [
+      'Alberta','British Columbia','Manitoba','New Brunswick',
+      'Newfoundland and Labrador','Northwest Territories','Nova Scotia','Nunavut',
+      'Ontario','Prince Edward Island','Quebec','Saskatchewan','Yukon Territory',
+    ]
+
+    let stateOptions
+    if (filters.country === 'United States') {
+      stateOptions = US_STATES
+    } else if (filters.country === 'Canada') {
+      stateOptions = CA_PROVINCES
+    } else {
+      stateOptions = unique('state')
+    }
 
     const stateJobs = filters.state
-      ? countryJobs.filter((j) => j.state === filters.state)
-      : countryJobs
+      ? jobs.filter((j) => j.state === filters.state)
+      : jobs
 
     return {
-      state: unique('state'),
+      state: stateOptions,
       location: [...new Set(stateJobs.map((j) => j.location_full).filter(Boolean))].sort(),
       workType: unique('work_type'),
       experienceLevel: unique('experience_level'),
