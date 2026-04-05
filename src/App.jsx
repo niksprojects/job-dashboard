@@ -55,6 +55,7 @@ function App() {
       .select('*')
       .gte('posted_date', cutoff)
       .order('posted_date', { ascending: false })
+      .limit(5000)
       .then(({ data, error }) => {
         if (error) {
           console.error('Supabase error:', error)
