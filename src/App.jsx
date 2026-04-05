@@ -79,7 +79,7 @@ function App() {
       : countryJobs
 
     return {
-      state: [...new Set(countryJobs.map((j) => j.state).filter(Boolean))].sort(),
+      state: unique('state'),
       location: [...new Set(stateJobs.map((j) => j.location_full).filter(Boolean))].sort(),
       workType: unique('work_type'),
       experienceLevel: unique('experience_level'),
