@@ -2,19 +2,25 @@
 """
 LinkedIn job scraper for job-dashboard.
 Uses Apify curious_coder~linkedin-jobs-scraper (free tier).
+Scrapes 7 roles x 3 locations = 21 queries, outputs JSON for Supabase ingestion.
 
 Usage:
-  python scripts/scrape.py --location "New York, NY"
-  python scripts/scrape.py --location "Canada"
+  # Full scrape (all roles, all locations)
   python scripts/scrape.py --all
-  python scripts/scrape.py --location "United States" --keywords "IT Project Manager" --count 100
+
+  # Single role, all locations
+  python scripts/scrape.py --all --role "Scrum Master"
+
+  # Single role, single location
+  python scripts/scrape.py --location "United States" --role "Project Manager"
+
+  # Then import to Supabase:
+  node scripts/scrape-jobs.mjs --input /tmp/linkedin-jobs-YYYY-MM-DD.json
 
 Reads APIFY_TOKEN from environment, or macOS Keychain if running locally.
-Saves/merges results into public/jobs.csv (deduplicates by LinkedIn job ID).
 """
 
 import argparse
-import csv
 import json
 import os
 import subprocess
@@ -22,28 +28,26 @@ import sys
 import time
 import urllib.request
 import urllib.parse
-from datetime import date, datetime, timedelta
+from datetime import date
 from pathlib import Path
-
-CUTOFF_DAYS = 30  # Remove jobs older than this many days
 
 ACTOR_ID = "curious_coder~linkedin-jobs-scraper"
 BASE_URL = "https://api.apify.com/v2"
-CSV_PATH = Path(__file__).parent.parent / "public" / "jobs.csv"
+OUTPUT_DIR = Path("/tmp")
+
+ROLES = [
+    "Scrum Master",
+    "Project Manager",
+    "Project Analyst",
+    "Project Coordinator",
+    "Project Administrator",
+]
 
 LOCATIONS = {
-    "United States":        "United States",
-    "New York, NY":         "New York, New York, United States",
-    "Maryland":             "Maryland, United States",
-    "Canada":               "Canada",
+    "United States": "United States",
+    "Canada":        "Canada",
+    "Remote":        "Remote",
 }
-
-CSV_FIELDS = [
-    "title", "location", "postedTime", "publishedAt", "jobUrl", "companyName",
-    "companyUrl", "description", "applicationsCount", "contractType",
-    "experienceLevel", "workType", "sector", "salary", "posterFullName",
-    "posterProfileUrl", "companyId", "applyUrl", "applyType", "benefits",
-]
 
 
 def get_token():
@@ -89,13 +93,17 @@ def api_post(path, token, data):
         return json.loads(resp.read())
 
 
-def map_job(job):
+def map_job(job, search_role, search_location):
+    """Map Apify LinkedIn job to our unified schema."""
     benefits = job.get("benefits", "")
     if isinstance(benefits, list):
         benefits = ", ".join(benefits)
+
+    location = job.get("location", "")
+
     return {
         "title":              job.get("title", ""),
-        "location":           job.get("location", ""),
+        "location":           location,
         "postedTime":         job.get("postedAt", ""),
         "publishedAt":        job.get("postedAt", ""),
         "jobUrl":             job.get("link", ""),
@@ -114,6 +122,9 @@ def map_job(job):
         "applyUrl":           job.get("applyUrl", ""),
         "applyType":          "",
         "benefits":           benefits,
+        "source":             "LinkedIn",
+        "search_role":        search_role,
+        "search_location":    search_location,
     }
 
 
@@ -124,7 +135,7 @@ def scrape_location(location_label, location_search, keywords, count, token):
         f"&location={urllib.parse.quote(location_search)}"
         "&f_TPR=r604800"
     )
-    print(f"\n[{location_label}] Starting scrape...")
+    print(f"\n[{keywords} | {location_label}] Starting scrape...")
     print(f"  URL: {search_url}")
 
     result = api_post(f"/acts/{ACTOR_ID}/runs", token, {"urls": [search_url], "count": count})
@@ -146,89 +157,46 @@ def scrape_location(location_label, location_search, keywords, count, token):
     items_data = api_get(f"/actor-runs/{run_id}/dataset/items", token, {"limit": count})
     items = items_data if isinstance(items_data, list) else items_data.get("data", {}).get("items", [])
     print(f"  Got {len(items)} jobs")
-    return [map_job(job) for job in items]
-
-
-def load_existing_csv():
-    if not CSV_PATH.exists():
-        return {}
-    jobs = {}
-    with open(CSV_PATH, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            job_id = row.get("companyId") or row.get("jobUrl", "")
-            if job_id:
-                jobs[job_id] = row
-    return jobs
-
-
-def remove_old_jobs(jobs_dict):
-    cutoff = date.today() - timedelta(days=CUTOFF_DAYS)
-    kept = {}
-    removed = 0
-    for key, job in jobs_dict.items():
-        published = job.get("publishedAt", "")
-        if published:
-            try:
-                job_date = datetime.strptime(published[:10], "%Y-%m-%d").date()
-                if job_date < cutoff:
-                    removed += 1
-                    continue
-            except ValueError:
-                pass  # Unparseable date — keep the job
-        kept[key] = job
-    if removed:
-        print(f"  Removed {removed} jobs older than {CUTOFF_DAYS} days ({cutoff})")
-    return kept
-
-
-def save_csv(jobs_dict):
-    CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
-        writer.writeheader()
-        writer.writerows(jobs_dict.values())
-    print(f"\nSaved {len(jobs_dict)} total jobs to {CSV_PATH}")
-
-
-def merge_jobs(existing, new_jobs):
-    merged = dict(existing)
-    added = updated = 0
-    for job in new_jobs:
-        key = job.get("companyId") or job.get("jobUrl", "")
-        if not key:
-            continue
-        if key in merged:
-            updated += 1
-        else:
-            added += 1
-        merged[key] = job
-    print(f"  Merged: {added} new, {updated} updated, {len(merged)} total")
-    return merged
+    return [map_job(job, keywords, location_label) for job in items]
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Scrape LinkedIn jobs via Apify")
+    parser = argparse.ArgumentParser(description="Scrape LinkedIn jobs via Apify (7 roles x 3 locations)")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--location", choices=list(LOCATIONS.keys()), help="Single location to scrape")
-    group.add_argument("--all", action="store_true", help="Scrape all configured locations")
-    parser.add_argument("--keywords", default="Project Manager", help="Job search keywords")
-    parser.add_argument("--count", type=int, default=200, help="Max jobs per location (default: 200)")
+    group.add_argument("--all", action="store_true", help="Scrape all locations")
+    parser.add_argument("--role", choices=ROLES, help="Single role (default: all roles)")
+    parser.add_argument("--count", type=int, default=100, help="Max jobs per query (default: 100)")
     args = parser.parse_args()
 
     token = get_token()
-    existing = load_existing_csv()
-    print(f"Loaded {len(existing)} existing jobs from CSV")
 
     locations_to_scrape = LOCATIONS if args.all else {args.location: LOCATIONS[args.location]}
+    roles_to_scrape = [args.role] if args.role else ROLES
 
-    all_new_jobs = []
-    for label, search in locations_to_scrape.items():
-        jobs = scrape_location(label, search, args.keywords, args.count, token)
-        all_new_jobs.extend(jobs)
+    total_queries = len(roles_to_scrape) * len(locations_to_scrape)
+    print(f"Running {total_queries} queries: {len(roles_to_scrape)} roles x {len(locations_to_scrape)} locations")
 
-    merged = merge_jobs(existing, all_new_jobs)
-    cleaned = remove_old_jobs(merged)
-    save_csv(cleaned)
+    all_jobs = []
+    query_num = 0
+    for role in roles_to_scrape:
+        for label, search in locations_to_scrape.items():
+            query_num += 1
+            print(f"\n--- Query {query_num}/{total_queries} ---")
+            jobs = scrape_location(label, search, role, args.count, token)
+            all_jobs.extend(jobs)
+
+    # Save to JSON file for scrape-jobs.mjs to import
+    today = date.today().isoformat()
+    output_file = OUTPUT_DIR / f"linkedin-jobs-{today}.json"
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(all_jobs, f, ensure_ascii=False)
+
+    print(f"\n{'=' * 50}")
+    print(f"Total: {len(all_jobs)} jobs from {total_queries} queries")
+    print(f"Saved to: {output_file}")
+    print(f"\nTo import into Supabase, run:")
+    print(f"  node scripts/scrape-jobs.mjs --input {output_file}")
 
 
 if __name__ == "__main__":

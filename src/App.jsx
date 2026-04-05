@@ -1,20 +1,16 @@
 import { useState, useEffect, useMemo } from 'react'
-import Papa from 'papaparse'
+import { useUser, UserButton } from '@clerk/clerk-react'
+import { supabase } from './supabase'
 import JobCard from './components/JobCard'
 import Filters from './components/Filters'
 import AccessGate, { PREVIEW_COUNT } from './components/AccessGate'
 import './App.css'
 
-const CANADA_PATTERN = /\bcanada\b|,\s*(ON|BC|AB|QC|MB|SK|NS|NB|NL|PE|NT|NU|YT)\b/i
-
-function detectCountry(location) {
-  return CANADA_PATTERN.test(location) ? 'Canada' : 'United States'
-}
-
 function getInitialFilters() {
   const params = new URLSearchParams(window.location.search)
   return {
     country: params.get('country') || '',
+    state: params.get('state') || '',
     location: params.get('location') || '',
     workType: params.get('workType') || '',
     experienceLevel: params.get('experienceLevel') || '',
@@ -26,7 +22,8 @@ function getInitialFilters() {
 function App() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [unlocked, setUnlocked] = useState(() => localStorage.getItem('jd_access') === 'true')
+  const { isSignedIn } = useUser()
+  const unlocked = isSignedIn
   const [search, setSearch] = useState(new URLSearchParams(window.location.search).get('search') || '')
   const [filters, setFilters] = useState(getInitialFilters)
   const [sortBy, setSortBy] = useState(new URLSearchParams(window.location.search).get('sort') || 'postedTime')
@@ -36,6 +33,7 @@ function App() {
     const params = new URLSearchParams()
     if (search) params.set('search', search)
     if (filters.country) params.set('country', filters.country)
+    if (filters.state) params.set('state', filters.state)
     if (filters.location) params.set('location', filters.location)
     if (filters.workType) params.set('workType', filters.workType)
     if (filters.experienceLevel) params.set('experienceLevel', filters.experienceLevel)
@@ -46,31 +44,48 @@ function App() {
     window.history.replaceState({}, '', newUrl)
   }, [search, filters, sortBy])
 
+  // Load jobs from Supabase (last 15 days)
   useEffect(() => {
-    Papa.parse('/jobs.csv', {
-      download: true,
-      header: true,
-      skipEmptyLines: true,
-      complete: (result) => {
-        setJobs(result.data)
+    const fifteenDaysAgo = new Date()
+    fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15)
+    const cutoff = fifteenDaysAgo.toISOString().split('T')[0]
+
+    supabase
+      .from('jobs')
+      .select('*')
+      .gte('posted_date', cutoff)
+      .order('posted_date', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('Supabase error:', error)
+          setLoading(false)
+          return
+        }
+        setJobs(data || [])
         setLoading(false)
-      },
-    })
+      })
   }, [])
 
   const filterOptions = useMemo(() => {
     const unique = (key) => [...new Set(jobs.map((j) => j[key]).filter(Boolean))].sort()
+
     const countryJobs = filters.country
-      ? jobs.filter((j) => detectCountry(j.location) === filters.country)
+      ? jobs.filter((j) => j.country === filters.country)
       : jobs
+
+    const stateJobs = filters.state
+      ? countryJobs.filter((j) => j.state === filters.state)
+      : countryJobs
+
     return {
-      location: [...new Set(countryJobs.map((j) => j.location).filter(Boolean))].sort(),
-      workType: unique('workType'),
-      experienceLevel: unique('experienceLevel'),
-      contractType: unique('contractType'),
+      state: [...new Set(countryJobs.map((j) => j.state).filter(Boolean))].sort(),
+      location: [...new Set(stateJobs.map((j) => j.location_full).filter(Boolean))].sort(),
+      workType: unique('work_type'),
+      experienceLevel: unique('experience_level'),
+      contractType: unique('schedule'),
       sector: unique('sector'),
     }
-  }, [jobs, filters.country])
+  }, [jobs, filters.country, filters.state])
 
   const filteredJobs = useMemo(() => {
     let result = jobs.filter((job) => {
@@ -78,19 +93,23 @@ function App() {
       const matchSearch =
         !q ||
         job.title?.toLowerCase().includes(q) ||
-        job.companyName?.toLowerCase().includes(q)
-      const matchCountry = !filters.country || detectCountry(job.location) === filters.country
-      const matchFilters = Object.entries(filters).every(
-        ([key, val]) => !val || key === 'country' || job[key] === val
-      )
-      return matchSearch && matchCountry && matchFilters
+        job.company_name?.toLowerCase().includes(q)
+      const matchCountry = !filters.country || job.country === filters.country
+      const matchState = !filters.state || job.state === filters.state
+      const matchLocation = !filters.location || job.location_full === filters.location
+      const matchWorkType = !filters.workType || job.work_type === filters.workType
+      const matchExpLevel = !filters.experienceLevel || job.experience_level === filters.experienceLevel
+      const matchContract = !filters.contractType || job.schedule === filters.contractType
+      const matchSector = !filters.sector || job.sector === filters.sector
+      return matchSearch && matchCountry && matchState && matchLocation &&
+        matchWorkType && matchExpLevel && matchContract && matchSector
     })
 
     if (sortBy === 'postedTime') {
-      result = [...result].sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
+      result = [...result].sort((a, b) => new Date(b.posted_date) - new Date(a.posted_date))
     } else if (sortBy === 'applicationsCount') {
       result = [...result].sort(
-        (a, b) => (parseInt(a.applicationsCount) || 999) - (parseInt(b.applicationsCount) || 999)
+        (a, b) => (parseInt(a.applications_count) || 999) - (parseInt(b.applications_count) || 999)
       )
     }
     return result
@@ -98,11 +117,10 @@ function App() {
 
   const clearFilters = () => {
     setSearch('')
-    setFilters({ country: '', location: '', workType: '', experienceLevel: '', contractType: '', sector: '' })
+    setFilters({ country: '', state: '', location: '', workType: '', experienceLevel: '', contractType: '', sector: '' })
     setSortBy('postedTime')
   }
 
-  // Build a shareable link based on current filters
   const shareableLink = useMemo(() => {
     return window.location.href
   }, [search, filters, sortBy])
@@ -112,19 +130,22 @@ function App() {
     alert('Link copied! Share this with your student.')
   }
 
-  if (loading) return <div className="loading">Loading jobs... ⏳</div>
+  if (loading) return <div className="loading">Loading jobs...</div>
 
   return (
     <div className="app">
       <header className="header">
         <div className="header-inner">
           <div>
-            <h1>🎯 Niks Projects — Job Board</h1>
+            <h1>Niks Projects — Job Board</h1>
             <p className="subtitle">Project Management Jobs · {jobs.length} total listings</p>
           </div>
-          <button className="btn-share" onClick={copyLink} title="Copy shareable link">
-            🔗 Share This View
-          </button>
+          <div className="header-actions">
+            <button className="btn-share" onClick={copyLink} title="Copy shareable link">
+              Share This View
+            </button>
+            {isSignedIn && <UserButton />}
+          </div>
         </div>
       </header>
 
@@ -165,11 +186,11 @@ function App() {
               <div className="no-results">No jobs match your filters. Try adjusting them!</div>
             ) : (
               <>
-                {(unlocked ? filteredJobs : filteredJobs.slice(0, PREVIEW_COUNT)).map((job, i) => (
-                  <JobCard key={i} job={job} />
+                {(unlocked ? filteredJobs : filteredJobs.slice(0, PREVIEW_COUNT)).map((job) => (
+                  <JobCard key={job.id} job={job} />
                 ))}
                 {!unlocked && filteredJobs.length > PREVIEW_COUNT && (
-                  <AccessGate onUnlock={() => setUnlocked(true)} />
+                  <AccessGate />
                 )}
               </>
             )}
