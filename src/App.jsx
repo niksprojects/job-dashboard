@@ -67,10 +67,8 @@ function App() {
       })
   }, [])
 
-  const filterOptions = useMemo(() => {
-    const unique = (key) => [...new Set(jobs.map((j) => j[key]).filter(Boolean))].sort()
-
-    const US_STATES = [
+  const { US_STATES, CA_PROVINCES, stateToCountry } = useMemo(() => {
+    const us = new Set([
       'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
       'Delaware','District of Columbia','Florida','Georgia','Hawaii','Idaho','Illinois',
       'Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts',
@@ -79,12 +77,20 @@ function App() {
       'Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina',
       'South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington',
       'West Virginia','Wisconsin','Wyoming',
-    ]
-    const CA_PROVINCES = [
+    ])
+    const ca = new Set([
       'Alberta','British Columbia','Manitoba','New Brunswick',
       'Newfoundland and Labrador','Northwest Territories','Nova Scotia','Nunavut',
       'Ontario','Prince Edward Island','Quebec','Saskatchewan','Yukon Territory',
-    ]
+    ])
+    const lookup = {}
+    for (const s of us) lookup[s] = 'United States'
+    for (const s of ca) lookup[s] = 'Canada'
+    return { US_STATES: [...us].sort(), CA_PROVINCES: [...ca].sort(), stateToCountry: lookup }
+  }, [])
+
+  const filterOptions = useMemo(() => {
+    const unique = (key) => [...new Set(jobs.map((j) => j[key]).filter(Boolean))].sort()
 
     let stateOptions
     if (filters.country === 'United States') {
@@ -107,7 +113,7 @@ function App() {
       contractType: unique('schedule'),
       sector: unique('sector'),
     }
-  }, [jobs, filters.country, filters.state])
+  }, [jobs, filters.country, filters.state, US_STATES, CA_PROVINCES])
 
   const filteredJobs = useMemo(() => {
     let result = jobs.filter((job) => {
@@ -116,7 +122,8 @@ function App() {
         !q ||
         job.title?.toLowerCase().includes(q) ||
         job.company_name?.toLowerCase().includes(q)
-      const matchCountry = !filters.country || job.country === filters.country
+      const jobCountry = job.country || stateToCountry[job.state] || null
+      const matchCountry = !filters.country || jobCountry === filters.country
       const matchState = !filters.state || job.state === filters.state
       const matchLocation = !filters.location || job.location_full === filters.location
       const matchWorkType = !filters.workType || job.work_type === filters.workType
