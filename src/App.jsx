@@ -44,27 +44,35 @@ function App() {
     window.history.replaceState({}, '', newUrl)
   }, [search, filters, sortBy])
 
-  // Load jobs from Supabase (last 15 days)
+  // Load jobs from Supabase (last 15 days), paginated to bypass 1000-row default
   useEffect(() => {
     const fifteenDaysAgo = new Date()
     fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15)
     const cutoff = fifteenDaysAgo.toISOString().split('T')[0]
 
-    supabase
-      .from('jobs')
-      .select('*')
-      .gte('posted_date', cutoff)
-      .order('posted_date', { ascending: false })
-      .limit(5000)
-      .then(({ data, error }) => {
+    async function fetchAllJobs() {
+      const pageSize = 1000
+      let allJobs = []
+      let from = 0
+      while (true) {
+        const { data, error } = await supabase
+          .from('jobs')
+          .select('*')
+          .gte('posted_date', cutoff)
+          .order('posted_date', { ascending: false })
+          .range(from, from + pageSize - 1)
         if (error) {
           console.error('Supabase error:', error)
-          setLoading(false)
-          return
+          break
         }
-        setJobs(data || [])
-        setLoading(false)
-      })
+        allJobs = allJobs.concat(data)
+        if (data.length < pageSize) break
+        from += pageSize
+      }
+      setJobs(allJobs)
+      setLoading(false)
+    }
+    fetchAllJobs()
   }, [])
 
   const { US_STATES, CA_PROVINCES, stateToCountry } = useMemo(() => {
