@@ -18,6 +18,36 @@ import { execSync } from 'child_process'
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://nndmgfjldqyvmfcuezuj.supabase.co'
 
+const STATE_ABBR = {
+  'AL':'Alabama','AK':'Alaska','AZ':'Arizona','AR':'Arkansas','CA':'California',
+  'CO':'Colorado','CT':'Connecticut','DE':'Delaware','FL':'Florida','GA':'Georgia',
+  'HI':'Hawaii','ID':'Idaho','IL':'Illinois','IN':'Indiana','IA':'Iowa',
+  'KS':'Kansas','KY':'Kentucky','LA':'Louisiana','ME':'Maine','MD':'Maryland',
+  'MA':'Massachusetts','MI':'Michigan','MN':'Minnesota','MS':'Mississippi','MO':'Missouri',
+  'MT':'Montana','NE':'Nebraska','NV':'Nevada','NH':'New Hampshire','NJ':'New Jersey',
+  'NM':'New Mexico','NY':'New York','NC':'North Carolina','ND':'North Dakota','OH':'Ohio',
+  'OK':'Oklahoma','OR':'Oregon','PA':'Pennsylvania','RI':'Rhode Island','SC':'South Carolina',
+  'SD':'South Dakota','TN':'Tennessee','TX':'Texas','UT':'Utah','VT':'Vermont',
+  'VA':'Virginia','WA':'Washington','WV':'West Virginia','WI':'Wisconsin','WY':'Wyoming',
+  'DC':'District of Columbia',
+  // Canadian provinces
+  'AB':'Alberta','BC':'British Columbia','MB':'Manitoba','NB':'New Brunswick',
+  'NL':'Newfoundland and Labrador','NS':'Nova Scotia','NT':'Northwest Territories',
+  'NU':'Nunavut','ON':'Ontario','PE':'Prince Edward Island','QC':'Quebec',
+  'SK':'Saskatchewan','YT':'Yukon',
+}
+
+function normalizeState(state) {
+  if (!state) return ''
+  const trimmed = state.trim()
+  // If it's an abbreviation, expand it
+  const upper = trimmed.toUpperCase()
+  if (STATE_ABBR[upper]) return STATE_ABBR[upper]
+  // If it's a country name, not a state
+  if (['united states', 'canada', 'remote'].includes(trimmed.toLowerCase())) return ''
+  return trimmed
+}
+
 function getServiceKey() {
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) return process.env.SUPABASE_SERVICE_ROLE_KEY
   try {
@@ -91,7 +121,7 @@ function mapJob(raw) {
   const title = raw['Job Title'] || raw.title || ''
   const company = raw['Company'] || raw.company_name || raw.companyName || ''
   const city = raw['City'] || raw.city || ''
-  const state = raw['State/Province'] || raw.state || ''
+  const state = normalizeState(raw['State/Province'] || raw.state || '')
   const country = normalizeCountry(raw['Country'] || raw.country || '')
   const source = raw['Source'] || raw.source || ''
   const postedRelative = raw['Posted'] || raw.posted_relative || raw.postedTime || ''
